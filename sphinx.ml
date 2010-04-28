@@ -1,9 +1,9 @@
 (**
   Sphinx searchd client in OCaml
 
-  Based on sphinxapi.py r2218
-
   Copyright (c) 2010, ygrek@autistici.org
+
+  Based on sphinxapi.py r2218
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License. You should have
@@ -44,7 +44,6 @@ type ranking =
   | RANK_MATCHANY
   | RANK_FIELDMASK
   | RANK_SPH04
-  | RANK_TOTAL
   deriving (Enum)
 
 (** sort modes *)
@@ -76,7 +75,7 @@ type query =
     mutable limit : int; (** how much records to return from result-set starting at offset (default is 20) *)
     mutable mode : matching; (** query matching mode (default is SPH_MATCH_ALL) *)
     mutable sort : sort; (** match sorting mode (default is SPH_SORT_RELEVANCE) *)
-    mutable sortby : string; (** attribute to sort by (defualt is "") *)
+    mutable sortby : string; (** attribute to sort by (default is "") *)
 		mutable min_id : int64; (** min ID to match (default is 0) *)
 		mutable max_id : int64; (** max ID to match (default is UINT_MAX) *)
 		mutable filters : int list; (** search filters *)
@@ -148,7 +147,9 @@ let default () =
 			self._socket = None
 *)
 
-let fail fmt = ksprintf failwith fmt
+exception Fail of string
+
+let fail fmt = ksprintf (fun s -> raise (Fail s)) fmt
 
 let recv sock n = 
   let s = String.create n in
@@ -165,7 +166,11 @@ let (>>) x f = f x
 let bits = bitstring_of_string
 let catch f x = try Some (f x) with _ -> None
 
-let connect ?(addr=ADDR_INET(inet_addr_loopback,9312)) () =
+(** [connect ?addr ?persist ()]
+  @param addr searchd socket (default [127.0.0.1:9312])
+  @param persistent connection (default [no], connection is closed by the server after the first request)
+*)
+let connect ?(addr=ADDR_INET(inet_addr_loopback,9312)) ?(persist=false) () =
 	let sock = socket PF_INET SOCK_STREAM 0 in
   try
     connect sock addr;
@@ -174,6 +179,10 @@ let connect ?(addr=ADDR_INET(inet_addr_loopback,9312)) () =
     | { s : -1 : string } -> fail "expected searchd version, got %S" s
     in
 		send sock & string_of_bitstring (BITSTRING { 1l : 32 });
+
+    if persist then
+      send sock & string_of_bitstring (BITSTRING { fst Command.persist : 16; snd Command.persist : 16; 4l : 32; 1l : 32 });
+
 		sock
   with
     exn -> close sock; raise exn
@@ -219,86 +228,13 @@ let set_limits q ?maxmatches ?cutoff ~offset ~limit =
 		begin match maxmatches with Some n when n > 0 -> q.maxmatches <- n | _ -> () end;
 		match cutoff with Some n when n >= 0 -> q.cutoff <- n | _ -> ()
 
+(** Set IDs range to match.
+		Only match records if document ID is beetwen [id1] and [id2] (inclusive). *)
+let set_id_range q id1 id2 =
+		q.min_id <- min id1 id2;
+		q.max_id <- max id1 id2
+
 (*
-	def SetMaxQueryTime (self, maxquerytime):
-		"""
-		Set maximum query time, in milliseconds, per-index. 0 means 'do not limit'.
-		"""
-		assert(isinstance(maxquerytime,int) and maxquerytime>0)
-		self._maxquerytime = maxquerytime
-
-
-	def SetMatchMode (self, mode):
-		"""
-		Set matching mode.
-		"""
-		assert(mode in [SPH_MATCH_ALL, SPH_MATCH_ANY, SPH_MATCH_PHRASE, SPH_MATCH_BOOLEAN, SPH_MATCH_EXTENDED, SPH_MATCH_FULLSCAN, SPH_MATCH_EXTENDED2])
-		self._mode = mode
-
-
-	def SetRankingMode (self, ranker):
-		"""
-		Set ranking mode.
-		"""
-		assert(ranker>=0 and ranker<SPH_RANK_TOTAL)
-		self._ranker = ranker
-
-
-	def SetSortMode ( self, mode, clause='' ):
-		"""
-		Set sorting mode.
-		"""
-		assert ( mode in [SPH_SORT_RELEVANCE, SPH_SORT_ATTR_DESC, SPH_SORT_ATTR_ASC, SPH_SORT_TIME_SEGMENTS, SPH_SORT_EXTENDED, SPH_SORT_EXPR] )
-		assert ( isinstance ( clause, str ) )
-		self._sort = mode
-		self._sortby = clause
-
-
-	def SetWeights (self, weights): 
-		"""
-		Set per-field weights.
-		WARNING, DEPRECATED; do not use it! use SetFieldWeights() instead
-		"""
-		assert(isinstance(weights, list))
-		for w in weights:
-			assert(isinstance(w, int))
-		self._weights = weights
-
-
-	def SetFieldWeights (self, weights):
-		"""
-		Bind per-field weights by name; expects (name,field_weight) dictionary as argument.
-		"""
-		assert(isinstance(weights,dict))
-		for key,val in weights.items():
-			assert(isinstance(key,str))
-			assert(isinstance(val,int))
-		self._fieldweights = weights
-
-
-	def SetIndexWeights (self, weights):
-		"""
-		Bind per-index weights by name; expects (name,index_weight) dictionary as argument.
-		"""
-		assert(isinstance(weights,dict))
-		for key,val in weights.items():
-			assert(isinstance(key,str))
-			assert(isinstance(val,int))
-		self._indexweights = weights
-
-
-	def SetIDRange (self, minid, maxid):
-		"""
-		Set IDs range to match.
-		Only match records if document ID is beetwen $min and $max (inclusive).
-		"""
-		assert(isinstance(minid, (int, long)))
-		assert(isinstance(maxid, (int, long)))
-		assert(minid<=maxid)
-		self._min_id = minid
-		self._max_id = maxid
-
-
 	def SetFilter ( self, attribute, values, exclude=0 ):
 		"""
 		Set values set filter.
@@ -402,13 +338,6 @@ let set_limits q ?maxmatches ?cutoff ~offset ~limit =
 		self._groupfunc = SPH_GROUPBY_DAY
 		self._groupsort = '@group desc'
 		self._groupdistinct = ''
-*)
-
-(*
-		self._error = results[0]['error']
-		self._warning = results[0]['warning']
-		if results[0]['status'] == SEARCHD_ERROR:
-			return None
 *)
 
 (** build query packet *)
@@ -790,31 +719,6 @@ let query sock q ?index ?comment s =
 
 		return res
 
-	### persistent connections
-
-	def Open(self):
-		if self._socket:
-			self._error = 'already connected'
-			return None
-		
-		server = self._Connect()
-		if not server:
-			return None
-
-		# command, command version = 0, body length = 4, body = 1
-		request = pack ( '>hhII', SEARCHD_COMMAND_PERSIST, 0, 4, 1 )
-		server.send ( request )
-		
-		self._socket = server
-		return True
-
-	def Close(self):
-		if not self._socket:
-			self._error = 'not connected'
-			return
-		self._socket.close()
-		self._socket = None
-	
 	def EscapeString(self, string):
 		return re.sub(r"([=\(\)|\-!@~\"&/\\\^\$\=])", r"\\\1", string)
 

@@ -7,7 +7,7 @@ let pr fmt = ksprintf print_endline fmt
 
 let search ?index squery =
   let q = default () in
-  let c = connect () in
+  let c = connect ~persist:true () in
   q.mode <- MATCH_EXTENDED2;
   let r = query c q ?index squery in
   close c;
