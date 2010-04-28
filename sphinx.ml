@@ -57,8 +57,15 @@ type filter = FILTER_VALUES | FILTER_RANGE | FILTER_FLOATRANGE
 (** attribute types *)
 type attr1 = ATTR_NONE | ATTR_INTEGER | ATTR_TIMESTAMP | ATTR_ORDINAL | ATTR_BOOL | ATTR_FLOAT | ATTR_BIGINT
   deriving (Enum)
+
 type attr = attr1 * bool
-type attr_value = F of float | L of int | Q of int64 | LI of int list
+type attr_value = F of float | L of int | Q of int64 | LI of int array
+
+let show_attr = function
+  | F f -> string_of_float f
+  | L x -> string_of_int x
+  | Q x -> Int64.to_string x
+  | LI l -> "[" ^ String.concat "," (List.map string_of_int (Array.to_list l)) ^ "]"
 
 let attr_multi = 0X40000000
 let attr_of_int a =
@@ -98,12 +105,13 @@ type query =
 
 type result =
   { 
-    fields : string list;
-    matches : (int64 * int * (string * attr_value) list) list;
+    fields : string array;
+    attrs : string array;
+    matches : (int64 * int * attr_value array) array;
     total : int;
     total_found : int;
     time : int; (** milliseconds *)
-    words : (string * (int * int)) list; (** word * (docs * hits) *)
+    words : (string * (int * int)) array; (** word * (docs * hits) *)
   }
 
 let default () = 
@@ -458,7 +466,7 @@ let run sock reqs =
   let qword () = IO.BigEndian.read_i64 cin in
   let float () = Int32.float_of_bits (IO.BigEndian.read_real_i32 cin) in
   let str () = let len = long () in IO.really_nread cin len in
-  let list k = let len = long () in List.init len (fun _ -> k ()) in
+  let list k = let len = long () in Array.init len (fun _ -> k ()) in
   let pair kx ky = fun () -> let x = kx () in let y = ky () in (x,y) in
 
   let result () =
@@ -466,27 +474,26 @@ let run sock reqs =
     let attrs = list (pair str long) in
     let count = long () in
     let id64 = long () in
-    let matches = List.init count begin fun _ ->
+    let matches = Array.init count begin fun _ ->
       let doc = if id64 > 0 then qword () else Int64.of_int (long ()) in
       let weight = long () in
-      let attrs = attrs >> List.map (fun (name,t) ->
-        let v = match attr_of_int t with
+      let attrs = attrs >> Array.map (fun (_,t) ->
+        match attr_of_int t with
         | ATTR_FLOAT, false -> F (float ())
         | ATTR_BIGINT, false -> Q (qword ())
         | ATTR_INTEGER, true -> LI (list long)
         | _, false -> L (long ())
-        | _ -> fail "unsupported attribute type : 0x%X" t
-        in
-        name, v)
+        | _ -> fail "unsupported attribute type : 0x%X" t)
       in
       (doc,weight,attrs)
     end
     in
+    let attrs = Array.map fst attrs in
     let total = long () in
     let total_found = long () in
     let time = long () in
     let words = list (pair str (pair long long)) in
-    { fields = fields; matches = matches; total = total; total_found = total_found; time = time; words = words }
+    { fields = fields; attrs = attrs; matches = matches; total = total; total_found = total_found; time = time; words = words }
   in
   let get () =
     let st = long () in

@@ -5,6 +5,9 @@ open Sphinx
 
 let pr fmt = ksprintf print_endline fmt
 
+let array k a = String.concat "," (Array.to_list (Array.map k a))
+let id x = x
+
 let search ?addr ?index queries =
   let q = default () in
   let c = connect ?addr ~persist:true () in
@@ -17,11 +20,12 @@ let search ?addr ?index queries =
     | `Err s -> pr "Error : %s" s
     | `Ok (r,w) -> 
       Option.may (pr "warning : %s") w;
-      pr "Fields : [%s]" (String.concat "," r.fields);
+      pr "Fields : [%s]" (array id r.fields);
+      pr "Attributes : [%s]" (array id r.attrs);
       pr "Total %d, total_found %d, time %d ms" r.total r.total_found r.time;
-      List.iteri (fun i (id,weight,attrs) -> pr "%d) doc %Ld weight %d attrs [%s]" i id weight (String.concat "," (List.map fst attrs))) r.matches;
+      Array.iteri (fun i (id,weight,attrs) -> pr "%d) doc %Ld weight %d attrs [%s]" i id weight (array show_attr attrs)) r.matches;
       pr "words:";
-      List.iter (fun (word,(docs,hits)) -> pr "%s (docs %d, hits %d)" word docs hits) r.words;
+      Array.iter (fun (word,(docs,hits)) -> pr "%s (docs %d, hits %d)" word docs hits) r.words;
       pr ""
   in
   List.iter each queries;
