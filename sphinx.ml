@@ -166,6 +166,14 @@ let (>>) x f = f x
 let bits = bitstring_of_string
 let catch f x = try Some (f x) with _ -> None
 
+let parse_sockaddr s =
+  let inet s n = Unix.ADDR_INET (Unix.inet_addr_of_string s, n) in
+  let unix s = Unix.ADDR_UNIX s in
+  try Scanf.sscanf s "[%s@]:%u" inet with _ -> 
+  try Scanf.sscanf s "%s@:%u" inet with _ ->
+  try Scanf.sscanf s "unix://%s" unix with _ ->
+  if String.starts_with s "/" then unix s else fail "unrecognized socket address : %s" s
+
 (** [connect ?addr ?persist ()]
   @param addr searchd socket (default [127.0.0.1:9312])
   @param persistent connection (default [no], connection is closed by the server after the first request)
