@@ -56,16 +56,15 @@ type filter = FILTER_VALUES | FILTER_RANGE | FILTER_FLOATRANGE
   deriving (Enum)
 
 (** attribute types *)
-(*
-SPH_ATTR_NONE			= 0
-SPH_ATTR_INTEGER		= 1
-SPH_ATTR_TIMESTAMP		= 2
-SPH_ATTR_ORDINAL		= 3
-SPH_ATTR_BOOL			= 4
-SPH_ATTR_FLOAT			= 5
-SPH_ATTR_BIGINT			= 6
-SPH_ATTR_MULTI			= 0X40000000L
-*)
+type attr1 = ATTR_NONE | ATTR_INTEGER | ATTR_TIMESTAMP | ATTR_ORDINAL | ATTR_BOOL | ATTR_FLOAT | ATTR_BIGINT
+  deriving (Enum)
+type attr = attr1 * bool
+type attr_value = F of float | L of int | Q of int64 | LI of int list
+
+let attr_multi = 0X40000000
+let attr_of_int a =
+  let multi = a land attr_multi = attr_multi in
+  try Enum.to_enum<attr1>(a land (lnot attr_multi)), multi with _ -> ATTR_NONE, multi
 
 (** grouping functions *)
 type grouping = GROUPBY_DAY | GROUPBY_WEEK | GROUPBY_MONTH | GROUPBY_YEAR | GROUPBY_ATTR | GROUPBY_ATTRPAIR
@@ -96,6 +95,16 @@ type query =
 		mutable fieldweights : (string * int) list; (** per-field-name weights (default is 1 for all fields) *)
 		mutable overrides : int list; (** per-query attribute values overrides *)
 		mutable select : string; (** select-list (attributes or expressions, with optional aliases) *)
+  }
+
+type result =
+  { 
+    fields : string list;
+    matches : (int64 * int * (string * attr_value) list) list;
+    total : int;
+    total_found : int;
+    time : int; (** milliseconds *)
+    words : (string * (int * int)) list; (** word * (docs * hits) *)
   }
 
 let default () = 
@@ -152,6 +161,7 @@ let send sock s =
   if n <> n' then fail "send: expected %u bytes, but sent %u" n n'
 
 let (&) f x = f x
+let (>>) x f = f x
 let bits = bitstring_of_string
 let catch f x = try Some (f x) with _ -> None
 
@@ -192,10 +202,10 @@ let get_response sock client_ver =
                   (version lsr 8) (version land 0xFF) (client_ver lsr 8) (client_ver land 0xFF))
       else None 
       in
-      bits r, w
+      r, w
     | Some Warning ->
       bitmatch bits r with
-      | { len : 32; w : (Int32.to_int len) : string; r : -1 : bitstring } -> (r, Some w)
+      | { len : 32; w : (Int32.to_int len) : string; r : -1 : string } -> (r, Some w)
       | { _ } -> fail "get_response: bad warning: %S" r
     end
   | { s : -1 : string } -> fail "get_response: recv: %S" s
@@ -409,6 +419,7 @@ let build q ?(index="*") ?(comment="") query =
   let str s = dd (String.length s); IO.nwrite out s in
   let list l k = dd (List.length l); List.iter k l in
   let pair kx ky (x,y) = kx x; ky y in
+
   dd q.offset;
   dd q.limit;
   dd & Enum.from_enum<matching> q.mode;
@@ -485,135 +496,70 @@ let build q ?(index="*") ?(comment="") query =
 
 (** Run queries batch.
 		@return an array of result sets *)
-let run sock l =
-  assert (l <> []);
+let run sock reqs =
+  assert (reqs <> []);
 
-  let out = IO.output_string () in
-  let dw = IO.BigEndian.write_i16 out in
-  let dd = IO.BigEndian.write_i32 out in
-  let list l k = dd (List.length l); List.iter k l in
-  let len = List.fold_left (fun acc s -> acc + String.length s) 0 l in
-  dw & fst Command.search;
-  dw & snd Command.search;
-  dd & len + 4;
-  list l (IO.nwrite out);
-	send sock & IO.close_out out;
+  let () = 
+    let out = IO.output_string () in
+    let dw = IO.BigEndian.write_i16 out in
+    let dd = IO.BigEndian.write_i32 out in
+    let list l k = dd (List.length l); List.iter k l in
+    let len = List.fold_left (fun acc s -> acc + String.length s) 0 reqs in
 
-  let n = List.length l in
+    dw & fst Command.search;
+    dw & snd Command.search;
+    dd & len + 4;
+    list reqs (IO.nwrite out);
+
+  	send sock & IO.close_out out;
+  in
+
   let (r,w) = get_response sock (snd Command.search) in
-  [ (r,w) ]
 
-(*
-		# parse response
-		max_ = len(response)
-		p = 0
+  let cin = IO.input_string r in
+  let long () = IO.BigEndian.read_i32 cin in
+  let qword () = IO.BigEndian.read_i64 cin in
+  let float () = Int32.float_of_bits (IO.BigEndian.read_real_i32 cin) in
+  let str () = let len = long () in IO.really_nread cin len in
+  let list k = let len = long () in List.init len (fun _ -> k ()) in
+  let pair kx ky = fun () -> let x = kx () in let y = ky () in (x,y) in
 
-		results = []
-		for i in range(0,nreqs,1):
-			result = {}
-			results.append(result)
-
-			result['error'] = ''
-			result['warning'] = ''
-			status = unpack('>L', response[p:p+4])[0]
-			p += 4
-			result['status'] = status
-			if status != SEARCHD_OK:
-				length = unpack('>L', response[p:p+4])[0]
-				p += 4
-				message = response[p:p+length]
-				p += length
-
-				if status == SEARCHD_WARNING:
-					result['warning'] = message
-				else:
-					result['error'] = message
-					continue
-
-			# read schema
-			fields = []
-			attrs = []
-
-			nfields = unpack('>L', response[p:p+4])[0]
-			p += 4
-			while nfields>0 and p<max_:
-				nfields -= 1
-				length = unpack('>L', response[p:p+4])[0]
-				p += 4
-				fields.append(response[p:p+length])
-				p += length
-
-			result['fields'] = fields
-
-			nattrs = unpack('>L', response[p:p+4])[0]
-			p += 4
-			while nattrs>0 and p<max_:
-				nattrs -= 1
-				length = unpack('>L', response[p:p+4])[0]
-				p += 4
-				attr = response[p:p+length]
-				p += length
-				type_ = unpack('>L', response[p:p+4])[0]
-				p += 4
-				attrs.append([attr,type_])
-
-			result['attrs'] = attrs
-
-			# read match count
-			count = unpack('>L', response[p:p+4])[0]
-			p += 4
-			id64 = unpack('>L', response[p:p+4])[0]
-			p += 4
-		
-			# read matches
-			result['matches'] = []
-			while count>0 and p<max_:
-				count -= 1
-				if id64:
-					doc, weight = unpack('>QL', response[p:p+12])
-					p += 12
-				else:
-					doc, weight = unpack('>2L', response[p:p+8])
-					p += 8
-
-				match = { 'id':doc, 'weight':weight, 'attrs':{} }
-				for i in range(len(attrs)):
-					if attrs[i][1] == SPH_ATTR_FLOAT:
-						match['attrs'][attrs[i][0]] = unpack('>f', response[p:p+4])[0]
-					elif attrs[i][1] == SPH_ATTR_BIGINT:
-						match['attrs'][attrs[i][0]] = unpack('>q', response[p:p+8])[0]
-						p += 4
-					elif attrs[i][1] == (SPH_ATTR_MULTI | SPH_ATTR_INTEGER):
-						match['attrs'][attrs[i][0]] = []
-						nvals = unpack('>L', response[p:p+4])[0]
-						p += 4
-						for n in range(0,nvals,1):
-							match['attrs'][attrs[i][0]].append(unpack('>L', response[p:p+4])[0])
-							p += 4
-						p -= 4
-					else:
-						match['attrs'][attrs[i][0]] = unpack('>L', response[p:p+4])[0]
-					p += 4
-
-				result['matches'].append ( match )
-
-			result['total'], result['total_found'], result['time'], words = unpack('>4L', response[p:p+16])
-
-			result['time'] = '%.3f' % (result['time']/1000.0)
-			p += 16
-
-			result['words'] = []
-			while words>0:
-				words -= 1
-				length = unpack('>L', response[p:p+4])[0]
-				p += 4
-				word = response[p:p+length]
-				p += length
-				docs, hits = unpack('>2L', response[p:p+8])
-				p += 8
-
-				result['words'].append({'word':word, 'docs':docs, 'hits':hits})
-*)	
+  let result () =
+    let fields = list str in
+    let attrs = list (pair str long) in
+    let count = long () in
+    let id64 = long () in
+    let matches = List.init count begin fun _ ->
+      let doc = if id64 > 0 then qword () else Int64.of_int (long ()) in
+      let weight = long () in
+      let attrs = attrs >> List.map (fun (name,t) ->
+        let v = match attr_of_int t with
+        | ATTR_FLOAT, false -> F (float ())
+        | ATTR_BIGINT, false -> Q (qword ())
+        | ATTR_INTEGER, true -> LI (list long)
+        | _, false -> L (long ())
+        | _ -> fail "unsupported attribute type : 0x%X" t
+        in
+        name, v)
+      in
+      (doc,weight,attrs)
+    end
+    in
+    let total = long () in
+    let total_found = long () in
+    let time = long () in
+    let words = list (pair str (pair long long)) in
+    { fields = fields; matches = matches; total = total; total_found = total_found; time = time; words = words }
+  in
+  let get () =
+    let st = long () in
+    match catch Enum.to_enum<status>(st) with
+    | None -> fail "run: unknown status code %d" st
+    | Some Error | Some Retry -> `Err (str ())
+    | Some Warning -> let warn = str () in `Ok (result (), Some warn)
+    | Some Ok -> `Ok (result (), None)
+  in
+  List.map (fun _ -> get ()) reqs, w
 
 (** Connect to searchd server and run given search query.
 		Raises exception on failure.
@@ -622,7 +568,7 @@ let run sock l =
 let query sock q ?index ?comment s =
   let s = build q ?index ?comment s in
   match run sock [s] with
-  | [r] -> r
+  | [r], w -> r, w
   | _ -> fail "run"
 
 (*
