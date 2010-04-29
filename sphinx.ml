@@ -3,7 +3,7 @@
 
   Copyright (c) 2010, ygrek@autistici.org
 
-  Based on sphinxapi.py r2218
+  Derived from sphinxapi.py r2218
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License. You should have
@@ -18,13 +18,23 @@ open Printf
 
 (** searchd commands and implementation versions *)
 module Command = struct
-let search = (0, 0x116)
+let search = (0, 0x117)
+(*
 let excerpt = (1, 0x100)
 let update = (2, 0x101)
 let keywords = (3, 0x100)
+*)
 let persist = (4, 0)
+(*
+let status = (5, 0x100)
+let query = (6, 0x100)
 let flushattrs = (7, 0x100)
+*)
 end
+
+type num = int
+let string_of_num = string_of_int
+let read_num = IO.BigEndian.read_i32
 
 (** searchd status codes *)
 type status = Ok | Error | Retry | Warning 
@@ -55,17 +65,27 @@ type filter = FILTER_VALUES | FILTER_RANGE | FILTER_FLOATRANGE
   deriving (Enum)
 
 (** attribute types *)
-type attr1 = ATTR_NONE | ATTR_INTEGER | ATTR_TIMESTAMP | ATTR_ORDINAL | ATTR_BOOL | ATTR_FLOAT | ATTR_BIGINT
+type attr1 = 
+  | ATTR_NONE (** not an attribute (unknown) *)
+  | ATTR_INTEGER
+  | ATTR_TIMESTAMP 
+  | ATTR_ORDINAL (** ordinal string number *)
+  | ATTR_BOOL (** boolean bit field *)
+  | ATTR_FLOAT
+  | ATTR_BIGINT
+  | ATTR_STRING
+  | ATTR_WORDCOUNT (** string word count *)
   deriving (Enum)
 
 type attr = attr1 * bool
-type attr_value = F of float | L of int | Q of int64 | LI of int array
+type attr_value = F of float | L of num | Q of int64 | MVA of num array | S of string
 
 let show_attr = function
   | F f -> string_of_float f
-  | L x -> string_of_int x
+  | S s -> s
+  | L x -> string_of_num x
   | Q x -> Int64.to_string x
-  | LI l -> "[" ^ String.concat "," (List.map string_of_int (Array.to_list l)) ^ "]"
+  | MVA l -> "[" ^ String.concat "," (List.map string_of_num (Array.to_list l)) ^ "]"
 
 let attr_multi = 0X40000000
 let attr_of_int a =
@@ -113,6 +133,8 @@ type result =
     time : int; (** milliseconds *)
     words : (string * (int * int)) array; (** word * (docs * hits) *)
   }
+
+let max_packet_size = Int32.of_int (2 * 1024 * 1024) (* 2 MB is enough (c) *)
 
 let default () = 
   {
@@ -190,11 +212,11 @@ let connect ?(addr=ADDR_INET(inet_addr_loopback,9312)) ?(persist=false) () =
 	let sock = socket PF_INET SOCK_STREAM 0 in
   try
     connect sock addr;
-    let () = bitmatch bits & recv sock 4 with
+    let () = bitmatch bits & recv sock 4 with (* check server version *)
     | { v : 32 } when v >= 1l -> ()
     | { s : -1 : string } -> fail "expected searchd version, got %S" s
     in
-		send sock & string_of_bitstring (BITSTRING { 1l : 32 });
+		send sock & string_of_bitstring (BITSTRING { 1l : 32 }); (* client version *)
 
     if persist then
       send sock & string_of_bitstring (BITSTRING { fst Command.persist : 16; snd Command.persist : 16; 4l : 32; 1l : 32 });
@@ -208,7 +230,8 @@ let close = close
 let get_response sock client_ver =
   bitmatch bits & recv sock 8 with
   | { status : 16; version : 16; length : 32 } ->
-    let length = Int32.to_int length (* FIXME check overflow? *) in
+    let () = assert (length < max_packet_size) in
+    let length = Int32.to_int length in
 		let r = String.create length in
 		let cur = ref 0 in
 		let () = while !cur < length do
@@ -463,6 +486,7 @@ let run sock reqs =
 
   let cin = IO.input_string r in
   let long () = IO.BigEndian.read_i32 cin in
+  let num () = read_num cin in
   let qword () = IO.BigEndian.read_i64 cin in
   let float () = Int32.float_of_bits (IO.BigEndian.read_real_i32 cin) in
   let str () = let len = long () in IO.really_nread cin len in
@@ -477,13 +501,15 @@ let run sock reqs =
     let matches = Array.init count begin fun _ ->
       let doc = if id64 > 0 then qword () else Int64.of_int (long ()) in
       let weight = long () in
-      let attrs = attrs >> Array.map (fun (_,t) ->
+      let attrs = attrs >> Array.map begin fun (_,t) ->
         match attr_of_int t with
+        | ATTR_STRING, false -> S (str ())
         | ATTR_FLOAT, false -> F (float ())
         | ATTR_BIGINT, false -> Q (qword ())
-        | ATTR_INTEGER, true -> LI (list long)
-        | _, false -> L (long ())
-        | _ -> fail "unsupported attribute type : 0x%X" t)
+        | (ATTR_NONE | ATTR_STRING | ATTR_FLOAT | ATTR_BIGINT), true -> fail "unsupported MVA type : 0x%X" t
+        | _, true -> MVA (list num)
+        | _, false -> L (num ())
+        end
       in
       (doc,weight,attrs)
     end
