@@ -1,4 +1,4 @@
-(**
+(*
   Sphinx searchd client in OCaml
 
   Copyright (c) 2010, ygrek@autistici.org
@@ -9,6 +9,11 @@
   it under the terms of the GNU General Public License. You should have
   received a copy of the GPL license along with this program; if you
   did not, you can find it at http://www.gnu.org/
+*)
+
+(**
+  {{:http://sphinxsearch.com/}Sphinx} API
+  @author ygrek
 *)
 
 open ExtLib
@@ -32,9 +37,13 @@ let flushattrs = (7, 0x100)
 *)
 end
 
+(** number attribute type *)
 type num = int
 let string_of_num = string_of_int
 let read_num = IO.BigEndian.read_i32
+
+(** Maximum network packet size, 2 MB is enough (c) *)
+let max_packet_size = Int32.of_int (2 * 1024 * 1024)
 
 (** searchd status codes *)
 type status = Ok | Error | Retry | Warning 
@@ -100,8 +109,8 @@ type query =
   {
     mutable offset : int; (** how much records to seek from result-set start (default is 0) *)
     mutable limit : int; (** how much records to return from result-set starting at offset (default is 20) *)
-    mutable mode : matching; (** query matching mode (default is SPH_MATCH_ALL) *)
-    mutable sort : sort; (** match sorting mode (default is SPH_SORT_RELEVANCE) *)
+    mutable mode : matching; (** query matching mode (default is MATCH_ALL) *)
+    mutable sort : sort; (** match sorting mode (default is SORT_RELEVANCE) *)
     mutable sortby : string; (** attribute to sort by (default is "") *)
     mutable min_id : int64; (** min ID to match (default is 0) *)
     mutable max_id : int64; (** max ID to match (default is UINT_MAX) *)
@@ -116,7 +125,7 @@ type query =
     mutable retrydelay : int; (** distributed retry delay *)
     mutable anchor : int list; (** geographical anchor point *)
     mutable indexweights : (string * int) list; (** per-index weights *)
-    mutable ranker : ranking; (** ranking mode *)
+    mutable ranker : ranking; (** ranking mode (default is RANK_PROXIMITY_BM25) *)
     mutable maxquerytime : int; (** max query time, milliseconds (default is 0, do not limit) *)
     mutable fieldweights : (string * int) list; (** per-field-name weights (default is 1 for all fields) *)
     mutable overrides : int list; (** per-query attribute values overrides *)
@@ -125,16 +134,15 @@ type query =
 
 type result =
   { 
-    fields : string array;
-    attrs : string array;
-    matches : (int64 * int * attr_value array) array;
+    fields : string array; (* schema (field names) *)
+    attrs : string array; (* attribute names *)
+    matches : (int64 * int * attr_value array) array; (** matches: (document id, weight, attributes) *)
     total : int;
     total_found : int;
-    time : int; (** milliseconds *)
-    words : (string * (int * int)) array; (** word * (docs * hits) *)
+    time : int; (** query execution time, in milliseconds *)
+    words : (string * (int * int)) array; (** words statistics: (word, (documents, hits)) *)
+    warning : string option; (** warning message *)
   }
-
-let max_packet_size = Int32.of_int (2 * 1024 * 1024) (* 2 MB is enough (c) *)
 
 let default () = 
   {
@@ -206,7 +214,7 @@ let parse_sockaddr s =
 
 (** [connect ?addr ?persist ()]
   @param addr searchd socket (default [127.0.0.1:9312])
-  @param persistent connection (default [no], connection is closed by the server after the first request)
+  @param persist persistent connection (default [false] - connection is closed by the server after the first request)
 *)
 let connect ?(addr=ADDR_INET(inet_addr_loopback,9312)) ?(persist=false) () =
   let sock = socket PF_INET SOCK_STREAM 0 in
@@ -462,8 +470,7 @@ let build q ?(index="*") ?(comment="") query =
 
   IO.close_out out
 
-(** Run queries batch.
-    @return an array of result sets *)
+(** run queries batch *)
 let run sock reqs =
   assert (reqs <> []);
 
@@ -493,7 +500,7 @@ let run sock reqs =
   let list k = let len = long () in Array.init len (fun _ -> k ()) in
   let pair kx ky = fun () -> let x = kx () in let y = ky () in (x,y) in
 
-  let result () =
+  let result warning =
     let fields = list str in
     let attrs = list (pair str long) in
     let count = long () in
@@ -519,21 +526,21 @@ let run sock reqs =
     let total_found = long () in
     let time = long () in
     let words = list (pair str (pair long long)) in
-    { fields = fields; attrs = attrs; matches = matches; total = total; total_found = total_found; time = time; words = words }
+    { fields = fields; attrs = attrs; matches = matches; total = total; total_found = total_found; time = time; words = words; warning = warning }
   in
   let get () =
     let st = long () in
     match catch Enum.to_enum<status>(st) with
     | None -> fail "run: unknown status code %d" st
     | Some Error | Some Retry -> `Err (str ())
-    | Some Warning -> let warn = str () in `Ok (result (), Some warn)
-    | Some Ok -> `Ok (result (), None)
+    | Some Warning -> let warn = Some (str ()) in `Ok (result warn)
+    | Some Ok -> `Ok (result None)
   in
   List.map (fun _ -> get ()) reqs, w
 
 (** Connect to searchd server and run given search query.
-    Raises exception on failure.
-    @return result set (see documentation for details).
+    @raise Fail on protocol errors
+    @return result set
 *)
 let query sock q ?index ?comment s =
   let s = build q ?index ?comment s in

@@ -18,8 +18,8 @@ let search ?addr ?index queries =
     Option.may (pr "Warning : %s") (snd r);
     match fst r with
     | `Err s -> pr "Error : %s" s
-    | `Ok (r,w) -> 
-      Option.may (pr "warning : %s") w;
+    | `Ok r ->
+      Option.may (pr "warning : %s") r.warning;
       pr "Fields : [%s]" (array id r.fields);
       pr "Attributes : [%s]" (array id r.attrs);
       pr "Total %d, total_found %d, time %d ms" r.total r.total_found r.time;
