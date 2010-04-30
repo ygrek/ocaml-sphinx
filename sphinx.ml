@@ -33,8 +33,8 @@ let persist = (4, 0)
 (*
 let status = (5, 0x100)
 let query = (6, 0x100)
-let flushattrs = (7, 0x100)
 *)
+let flushattrs = (7, 0x100)
 end
 
 (** number attribute type *)
@@ -770,20 +770,12 @@ let query sock q ?index ?comment s =
   def EscapeString(self, string):
     return re.sub(r"([=\(\)|\-!@~\"&/\\\^\$\=])", r"\\\1", string)
 
-
-  def FlushAttributes(self):
-    sock = self._Connect()
-    if not sock:
-      return -1
-
-    request = pack ( '>hhI', SEARCHD_COMMAND_FLUSHATTRS, VER_COMMAND_FLUSHATTRS, 0 ) # cmd, ver, bodylen
-    sock.send ( request )
-
-    response = self._GetResponse ( sock, VER_COMMAND_FLUSHATTRS )
-    if not response or len(response)!=4:
-      self._error = 'unexpected response length'
-      return -1
-
-    tag = unpack ( '>L', response[0:4] )[0]
-    return tag
 *)
+
+let flush_attributes sock =
+  send sock & string_of_bitstring (BITSTRING { fst Command.flushattrs : 16; snd Command.flushattrs : 16; 0l : 32 });
+  let (r,w) = get_response sock (snd Command.flushattrs) in
+  bitmatch bits r with
+  | { tag : 32 } -> tag
+  | { s : -1 : string } -> fail "flush_attributes: unexepected response : %S" s
+
