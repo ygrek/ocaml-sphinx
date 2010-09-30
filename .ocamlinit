@@ -1,0 +1,6 @@
+#use "topfind";;
+#require "extlib";;
+#require "bitstring";;
+#require "deriving";;
+#directory "_build";;
+#load "sphinx.cma";;
