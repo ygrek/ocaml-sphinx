@@ -1,32 +1,38 @@
+# OASIS_START
+# DO NOT EDIT (digest: bc1e05bfc8b39b664f29dae8dbd3ebbb)
 
-.PHONY: test build byte native clean doc
+SETUP = ocaml setup.ml
 
-build: byte native
-byte: sphinx.cma
-native: sphinx.cmxa
-test: test.native
+build: setup.data
+	$(SETUP) -build $(BUILDFLAGS)
 
-DEPS=-package extlib,deriving.syntax,bitstring.syntax -syntax camlp4o
+doc: setup.data build
+	$(SETUP) -doc $(DOCFLAGS)
 
-sphinx.cma: sphinx.ml
-	ocamlfind ocamlc -a -annot -g $(DEPS) $^ -o $@
+test: setup.data build
+	$(SETUP) -test $(TESTFLAGS)
 
-sphinx.cmxa: sphinx.ml
-	ocamlfind ocamlopt -a -annot -g $(DEPS) $^ -o $@
+all: 
+	$(SETUP) -all $(ALLFLAGS)
 
-test.native: sphinx.cmxa test.ml
-	ocamlfind ocamlopt -verbose -linkpkg -annot -g $(DEPS) $^ -o $@
+install: setup.data
+	$(SETUP) -install $(INSTALLFLAGS)
 
-doc:
-	-mkdir doc
-	ocamlfind ocamldoc -html -v $(DEPS) sphinx.ml -d doc
+uninstall: setup.data
+	$(SETUP) -uninstall $(UNINSTALLFLAGS)
 
-install:
-	ocamlfind install sphinx META $(wildcard sphinx.cmx sphinx.cmxa sphinx.a sphinx.lib sphinx.cma sphinx.cmi sphinx.mli)
+reinstall: setup.data
+	$(SETUP) -reinstall $(REINSTALLFLAGS)
 
-uninstall:
-	ocamlfind remove sphinx
+clean: 
+	$(SETUP) -clean $(CLEANFLAGS)
 
-clean:
-	rm -f *.cm* *.annot *.native *.o *.obj *.lib *.a
+distclean: 
+	$(SETUP) -distclean $(DISTCLEANFLAGS)
 
+setup.data:
+	$(SETUP) -configure $(CONFIGUREFLAGS)
+
+.PHONY: build doc test all install uninstall reinstall clean distclean configure
+
+# OASIS_STOP

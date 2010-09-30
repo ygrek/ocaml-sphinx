@@ -1,0 +1,28 @@
+OASISFormat: 0.1
+Name:        sphinx
+Version:     0.0.1
+Synopsis:    Sphinx searchd client API
+Authors:     ygrek
+License:     GPL-2 with OCaml linking exception
+Plugins:     META, DevFiles
+BuildTools:  ocamlbuild
+
+Library sphinx
+  Path:    .
+  Modules: Sphinx
+  BuildDepends: extlib, deriving.syntax, bitstring.syntax
+
+Executable test
+  Path:   .
+  MainIs: test.ml
+  CompiledObject: best
+  BuildDepends: sphinx
+  Install: false
+
+Document api
+  Title: API
+  Type: ocamlbuild
+  BuildTools: ocamldoc
+  XOCamlbuildPath: .
+  XOCamlbuildLibraries: sphinx
+

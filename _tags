@@ -1,0 +1,14 @@
+# OASIS_START
+# DO NOT EDIT (digest: 78e5f829f207d7d8599be7886c77a148)
+# Library sphinx
+# Executable test
+<test.{native,byte}>: use_sphinx
+<test.{native,byte}>: pkg_extlib
+<test.{native,byte}>: pkg_deriving.syntax
+<test.{native,byte}>: pkg_bitstring.syntax
+<*.ml{,i}>: use_sphinx
+<*.ml{,i}>: pkg_extlib
+<*.ml{,i}>: pkg_deriving.syntax
+<*.ml{,i}>: pkg_bitstring.syntax
+# OASIS_STOP
+<sphinx.ml>: syntax_camlp4o
