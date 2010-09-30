@@ -24,11 +24,9 @@ open Printf
 (** searchd commands and implementation versions *)
 module Command = struct
 let search = (0, 0x117)
-(*
-let excerpt = (1, 0x100)
-let update = (2, 0x101)
-let keywords = (3, 0x100)
-*)
+(* let excerpt = (1, 0x100) *)
+let update = (2, 0x102)
+(* let keywords = (3, 0x100) *)
 let persist = (4, 0)
 (*
 let status = (5, 0x100)
@@ -196,12 +194,12 @@ let fail fmt = ksprintf (fun s -> raise (Fail s)) fmt
 
 let recv sock n = 
   let s = String.create n in
-  let n' = recv sock s 0 n [] in
+  let n' = read sock s 0 n in
   if n = n' then s else fail "recv: expected %u bytes, but got %u" n n'
 
 let send sock s =
   let n = String.length s in
-  let n' = send sock s 0 n [] in
+  let n' = write sock s 0 n in
   if n <> n' then fail "send: expected %u bytes, but sent %u" n n'
 
 let (&) f x = f x
@@ -400,7 +398,7 @@ let pair kx ky (x,y) = kx x; ky y
 let list out l k = dd out (List.length l); List.iter k l
 
 (** build query packet *)
-let build q ?(index="*") ?(comment="") query =
+let build_query q ?(index="*") ?(comment="") query =
   let out = IO.output_string () in
   let dd = dd out and dq = dq out and str = str out and list l = list out l in
 
@@ -481,7 +479,7 @@ let build q ?(index="*") ?(comment="") query =
 (* let pr fmt = ksprintf prerr_endline fmt *)
 
 (** run queries batch *)
-let run sock reqs =
+let run_queries sock reqs =
   assert (reqs <> []);
 
   let () = 
@@ -538,22 +536,22 @@ let run sock reqs =
   let get () =
     let st = long () in
     match catch Enum.to_enum<status>(st) with
-    | None -> fail "run: unknown status code %d" st
+    | None -> fail "run_queries: unknown status code %d" st
     | Some Error | Some Retry -> `Err (str ())
     | Some Warning -> let warn = Some (str ()) in `Ok (result warn)
     | Some Ok -> `Ok (result None)
   in
   List.map (fun _ -> get ()) reqs, w
 
-(** Connect to searchd server and run given search query.
+(** Perform search query
     @raise Fail on protocol errors
     @return result set
 *)
 let query sock q ?index ?comment s =
-  let s = build q ?index ?comment s in
-  match run sock [s] with
+  let s = build_query q ?index ?comment s in
+  match run_queries sock [s] with
   | [r], w -> r, w
-  | _ -> fail "run"
+  | _ -> fail "query"
 
 (*
   def BuildExcerpts (self, docs, index, words, opts=None):
@@ -657,62 +655,6 @@ let query sock q ?index ?comment s =
 
     return res
 
-
-  def UpdateAttributes ( self, index, attrs, values ):
-    """
-    Update given attribute values on given documents in given indexes.
-    Returns amount of updated documents (0 or more) on success, or -1 on failure.
-
-    'attrs' must be a list of strings.
-    'values' must be a dict with int key (document ID) and list of int values (new attribute values).
-
-    Example:
-      res = cl.UpdateAttributes ( 'test1', [ 'group_id', 'date_added' ], { 2:[123,1000000000], 4:[456,1234567890] } )
-    """
-    assert ( isinstance ( index, str ) )
-    assert ( isinstance ( attrs, list ) )
-    assert ( isinstance ( values, dict ) )
-    for attr in attrs:
-      assert ( isinstance ( attr, str ) )
-    for docid, entry in values.items():
-      assert ( isinstance ( docid, int ) )
-      assert ( isinstance ( entry, list ) )
-      assert ( len(attrs)==len(entry) )
-      for val in entry:
-        assert ( isinstance ( val, int ) )
-
-    # build request
-    req = [ pack('>L',len(index)), index ]
-
-    req.append ( pack('>L',len(attrs)) )
-    for attr in attrs:
-      req.append ( pack('>L',len(attr)) + attr )
-
-    req.append ( pack('>L',len(values)) )
-    for docid, entry in values.items():
-      req.append ( pack('>Q',docid) )
-      for val in entry:
-        req.append ( pack('>L',val) )
-
-    # connect, send query, get response
-    sock = self._Connect()
-    if not sock:
-      return None
-
-    req = ''.join(req)
-    length = len(req)
-    req = pack ( '>2HL', SEARCHD_COMMAND_UPDATE, VER_COMMAND_UPDATE, length ) + req
-    wrote = sock.send ( req )
-
-    response = self._GetResponse ( sock, VER_COMMAND_UPDATE )
-    if not response:
-      return -1
-
-    # parse response
-    updated = unpack ( '>L', response[0:4] )[0]
-    return updated
-
-
   def BuildKeywords ( self, query, index, hits ):
     """
     Connect to searchd server, and generate keywords list for a given query.
@@ -779,10 +721,38 @@ let query sock q ?index ?comment s =
 
 *)
 
-let flush_attributes sock =
+let flush_attrs sock =
   send sock & string_of_bitstring (BITSTRING { fst Command.flushattrs : 16; snd Command.flushattrs : 16; 0l : 32 });
   let (r,w) = get_response sock (snd Command.flushattrs) in
   bitmatch bits r with
   | { tag : 32 } -> tag
-  | { s : -1 : string } -> fail "flush_attributes: unexepected response : %S" s
+  | { s : -1 : string } -> fail "flush_attrs: unexpected response : %S" s
+
+
+(**
+  [update_attrs conn index attrs values]
+  updates given attribute values on given documents in given indexes.
+  @return the number of updated documents (0 or more) on success, or -1 on failure
+
+  @param attrs attribute names
+  @param values document ids with corresponding new attribute values
+
+  E.g.: [ update_attrs conn "test_index" ["id"; "n"] [2L,[123;1000]; 4L,[456;2000]; 5L,[789;3000]] ]
+*)
+let update_attrs sock index attrs values =
+  let out = IO.output_string () in
+  let str = str out and dd = dd out in
+  let n = List.length attrs in
+  str index;
+  list out attrs (fun s -> str s; dd 0 (* ordinary attribute, not MVA *));
+  list out values (fun (docid, attrs) ->
+    if n <> List.length attrs then invalid_arg (sprintf "update_attrs(%s): not enough attributes for docid %Ld" index docid);
+    dq out docid; List.iter dd attrs);
+  let pkt = IO.close_out out in
+  send sock & string_of_bitstring (BITSTRING { fst Command.update : 16; snd Command.update : 16; Int32.of_int (String.length pkt) : 32 });
+  send sock pkt;
+  let (r,w) = get_response sock (snd Command.update) in
+  bitmatch bits r with
+  | { n : 32 } -> Int32.to_int n, w
+  | { s : -1 : string } -> fail "update_attrs: unexpected response : %S" s
 
