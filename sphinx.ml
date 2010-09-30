@@ -91,15 +91,15 @@ type attr_value = F of float | L of num | Q of int64 | MVA of num array | S of s
 
 let show_attr = function
   | F f -> string_of_float f
-  | S s -> s
+  | S s -> sprintf "%S" s
   | L x -> string_of_num x
   | Q x -> Int64.to_string x
   | MVA l -> "[" ^ String.concat "," (List.map string_of_num (Array.to_list l)) ^ "]"
 
-let attr_multi = 0X40000000
-let attr_of_int a =
-  let multi = a land attr_multi = attr_multi in
-  try Enum.to_enum<attr1>(a land (lnot attr_multi)), multi with _ -> ATTR_NONE, multi
+let attr_multi = 0X40000000l
+let attr_of_int32 a =
+  let multi = Int32.logand a attr_multi = attr_multi in
+  try Enum.to_enum<attr1>((Int32.to_int a) land 0x00FFFFFF), multi with _ -> ATTR_NONE, multi
 
 (** grouping functions *)
 type grouping = GROUPBY_DAY | GROUPBY_WEEK | GROUPBY_MONTH | GROUPBY_YEAR | GROUPBY_ATTR | GROUPBY_ATTRPAIR
@@ -387,14 +387,17 @@ let set_id_range q id1 id2 =
     self._groupdistinct = ''
 *)
 
+let dw = IO.BigEndian.write_i16
+let dd = IO.BigEndian.write_i32
+let dq = IO.BigEndian.write_i64
+let str out s = dd out (String.length s); IO.nwrite out s
+let pair kx ky (x,y) = kx x; ky y
+let list out l k = dd out (List.length l); List.iter k l
+
 (** build query packet *)
 let build q ?(index="*") ?(comment="") query =
   let out = IO.output_string () in
-  let dd = IO.BigEndian.write_i32 out in
-  let dq = IO.BigEndian.write_i64 out in
-  let str s = dd (String.length s); IO.nwrite out s in
-  let list l k = dd (List.length l); List.iter k l in
-  let pair kx ky (x,y) = kx x; ky y in
+  let dd = dd out and dq = dq out and str = str out and list l = list out l in
 
   dd q.offset;
   dd q.limit;
@@ -470,23 +473,22 @@ let build q ?(index="*") ?(comment="") query =
 
   IO.close_out out
 
+(* let pr fmt = ksprintf prerr_endline fmt *)
+
 (** run queries batch *)
 let run sock reqs =
   assert (reqs <> []);
 
   let () = 
     let out = IO.output_string () in
-    let dw = IO.BigEndian.write_i16 out in
-    let dd = IO.BigEndian.write_i32 out in
-    let list l k = dd (List.length l); List.iter k l in
     let len = List.fold_left (fun acc s -> acc + String.length s) 0 reqs in
 
-    dw & fst Command.search;
-    dw & snd Command.search;
-    dd & len + 4;
-    list reqs (IO.nwrite out);
+    dw out (fst Command.search);
+    dw out (snd Command.search);
+    dd out (len + 4);
+    list out reqs (IO.nwrite out);
 
-    send sock & IO.close_out out;
+    send sock (IO.close_out out);
   in
 
   let (r,w) = get_response sock (snd Command.search) in
@@ -502,18 +504,18 @@ let run sock reqs =
 
   let result warning =
     let fields = list str in
-    let attrs = list (pair str long) in
+    let attrs = list (pair str (fun () -> IO.BigEndian.read_real_i32 cin)) in
     let count = long () in
     let id64 = long () in
     let matches = Array.init count begin fun _ ->
       let doc = if id64 > 0 then qword () else Int64.of_int (long ()) in
       let weight = long () in
       let attrs = attrs >> Array.map begin fun (_,t) ->
-        match attr_of_int t with
+        match attr_of_int32 t with
         | ATTR_STRING, false -> S (str ())
         | ATTR_FLOAT, false -> F (float ())
         | ATTR_BIGINT, false -> Q (qword ())
-        | (ATTR_NONE | ATTR_STRING | ATTR_FLOAT | ATTR_BIGINT), true -> fail "unsupported MVA type : 0x%X" t
+        | (ATTR_NONE | ATTR_STRING | ATTR_FLOAT | ATTR_BIGINT), true -> fail "unsupported MVA type : 0x%lX" t
         | _, true -> MVA (list num)
         | _, false -> L (num ())
         end
