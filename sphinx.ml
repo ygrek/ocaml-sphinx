@@ -38,9 +38,14 @@ let flushattrs = (7, 0x100)
 end
 
 (** number attribute type *)
+(*
 type num = int
 let string_of_num = string_of_int
 let read_num = IO.BigEndian.read_i32
+*)
+type num = int32
+let string_of_num x = Int32.to_string x
+let read_num = IO.BigEndian.read_real_i32
 
 (** Maximum network packet size, 2 MB is enough (c) *)
 let max_packet_size = Int32.of_int (2 * 1024 * 1024)
