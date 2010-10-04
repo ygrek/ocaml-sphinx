@@ -3,12 +3,19 @@
 
   Copyright (c) 2010, ygrek@autistici.org
 
-  Derived from sphinxapi.py r2218
+  This library is free software; you can redistribute it and/or
+  modify it under the terms of the GNU Lesser General Public
+  License as published by the Free Software Foundation; either
+  version 2.1 of the License, or (at your option) any later version.
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License. You should have
-  received a copy of the GPL license along with this program; if you
-  did not, you can find it at http://www.gnu.org/
+  This library is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+  Lesser General Public License for more details.
+
+  You should have received a copy of the GNU Lesser General Public
+  License along with this library; if not, write to the Free Software
+  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307  USA
 *)
 
 (**
@@ -35,7 +42,7 @@ let query = (6, 0x100)
 let flushattrs = (7, 0x100)
 end
 
-(** number attribute type *)
+(** Number attribute type *)
 (*
 type num = int
 let string_of_num = string_of_int
@@ -50,11 +57,15 @@ let max_packet_size = Int32.of_int (2 * 1024 * 1024)
 
 (** searchd status codes *)
 type status = Ok | Error | Retry | Warning 
-  deriving (Enum)
+  deriving (Enum,Show)
+
+let show_status = Show.show<status>
 
 (** match modes *)
 type matching = MATCH_ALL | MATCH_ANY | MATCH_PHRASE | MATCH_BOOLEAN | MATCH_EXTENDED | MATCH_FULLSCAN | MATCH_EXTENDED2
-  deriving (Enum)
+  deriving (Enum,Show)
+
+let show_matching = Show.show<matching>
 
 (** ranking modes (for MATCH_EXTENDED2 only) *)
 type ranking =
@@ -66,15 +77,21 @@ type ranking =
   | RANK_MATCHANY
   | RANK_FIELDMASK
   | RANK_SPH04
-  deriving (Enum)
+  deriving (Enum,Show)
+
+let show_ranking = Show.show<ranking>
 
 (** sort modes *)
 type sort = SORT_RELEVANCE | SORT_ATTR_DESC | SORT_ATTR_ASC | SORT_TIME_SEGMENTS | SORT_EXTENDED | SORT_EXPR
-  deriving (Enum)
+  deriving (Enum,Show)
+
+let show_sort = Show.show<sort>
 
 (** filter types *)
 type filter = FILTER_VALUES | FILTER_RANGE | FILTER_FLOATRANGE
-  deriving (Enum)
+  deriving (Enum,Show)
+
+let show_filter = Show.show<filter>
 
 (** attribute types *)
 type attr1 = 
@@ -87,9 +104,14 @@ type attr1 =
   | ATTR_BIGINT
   | ATTR_STRING
   | ATTR_WORDCOUNT (** string word count *)
-  deriving (Enum)
+  deriving (Enum,Show)
 
-type attr = attr1 * bool
+type attr_type = attr1 * bool
+
+let show_attr_type = function
+  | (t,true) -> sprintf "MVA(%s)" (Show.show<attr1>(t))
+  | (t,false) -> Show.show<attr1>(t)
+
 type attr_value = F of float | L of num | Q of int64 | MVA of num array | S of string
 
 let show_attr = function
@@ -106,7 +128,9 @@ let attr_of_int32 a =
 
 (** grouping functions *)
 type grouping = GROUPBY_DAY | GROUPBY_WEEK | GROUPBY_MONTH | GROUPBY_YEAR | GROUPBY_ATTR | GROUPBY_ATTRPAIR
-  deriving (Enum)
+  deriving (Enum,Show)
+
+let show_grouping = Show.show<grouping>
 
 type query =
   {
@@ -174,20 +198,6 @@ let default () =
     select = "*";
   }
 
-(*
-    if self._socket:
-      # we have a socket, but is it still alive?
-      sr, sw, _ = select.select ( [self._socket], [self._socket], [], 0 )
-
-      # this is how alive socket should look
-      if len(sr)==0 and len(sw)==1:
-        return self._socket
-
-      # oops, looks like it was closed, lets reopen
-      self._socket.close()
-      self._socket = None
-*)
-
 exception Fail of string
 
 let fail fmt = ksprintf (fun s -> raise (Fail s)) fmt
@@ -214,6 +224,8 @@ let parse_sockaddr s =
   try Scanf.sscanf s "%s@:%u" inet with _ ->
   try Scanf.sscanf s "unix://%s" unix with _ ->
   if String.starts_with s "/" then unix s else fail "unrecognized socket address : %s" s
+
+type conn = Unix.file_descr
 
 (** [connect ?addr ?persist ()]
   @param addr searchd socket (default [127.0.0.1:9312])
@@ -283,112 +295,6 @@ let set_limits q ?maxmatches ?cutoff ~offset ~limit =
 let set_id_range q id1 id2 =
     q.min_id <- min id1 id2;
     q.max_id <- max id1 id2
-
-(*
-  def SetFilter ( self, attribute, values, exclude=0 ):
-    """
-    Set values set filter.
-    Only match records where 'attribute' value is in given 'values' set.
-    """
-    assert(isinstance(attribute, str))
-    assert iter(values)
-
-    for value in values:
-      assert(isinstance(value, int))
-
-    self._filters.append ( { 'type':SPH_FILTER_VALUES, 'attr':attribute, 'exclude':exclude, 'values':values } )
-
-
-  def SetFilterRange (self, attribute, min_, max_, exclude=0 ):
-    """
-    Set range filter.
-    Only match records if 'attribute' value is beetwen 'min_' and 'max_' (inclusive).
-    """
-    assert(isinstance(attribute, str))
-    assert(isinstance(min_, int))
-    assert(isinstance(max_, int))
-    assert(min_<=max_)
-
-    self._filters.append ( { 'type':SPH_FILTER_RANGE, 'attr':attribute, 'exclude':exclude, 'min':min_, 'max':max_ } )
-
-
-  def SetFilterFloatRange (self, attribute, min_, max_, exclude=0 ):
-    assert(isinstance(attribute,str))
-    assert(isinstance(min_,float))
-    assert(isinstance(max_,float))
-    assert(min_ <= max_)
-    self._filters.append ( {'type':SPH_FILTER_FLOATRANGE, 'attr':attribute, 'exclude':exclude, 'min':min_, 'max':max_} )
-
-
-  def SetGeoAnchor (self, attrlat, attrlong, latitude, longitude):
-    assert(isinstance(attrlat,str))
-    assert(isinstance(attrlong,str))
-    assert(isinstance(latitude,float))
-    assert(isinstance(longitude,float))
-    self._anchor['attrlat'] = attrlat
-    self._anchor['attrlong'] = attrlong
-    self._anchor['lat'] = latitude
-    self._anchor['long'] = longitude
-
-
-  def SetGroupBy ( self, attribute, func, groupsort='@group desc' ):
-    """
-    Set grouping attribute and function.
-    """
-    assert(isinstance(attribute, str))
-    assert(func in [SPH_GROUPBY_DAY, SPH_GROUPBY_WEEK, SPH_GROUPBY_MONTH, SPH_GROUPBY_YEAR, SPH_GROUPBY_ATTR, SPH_GROUPBY_ATTRPAIR] )
-    assert(isinstance(groupsort, str))
-
-    self._groupby = attribute
-    self._groupfunc = func
-    self._groupsort = groupsort
-
-
-  def SetGroupDistinct (self, attribute):
-    assert(isinstance(attribute,str))
-    self._groupdistinct = attribute
-
-
-  def SetRetries (self, count, delay=0):
-    assert(isinstance(count,int) and count>=0)
-    assert(isinstance(delay,int) and delay>=0)
-    self._retrycount = count
-    self._retrydelay = delay
-
-
-  def SetOverride (self, name, type, values):
-    assert(isinstance(name, str))
-    assert(type in SPH_ATTR_TYPES)
-    assert(isinstance(values, dict))
-
-    self._overrides[name] = {'name': name, 'type': type, 'values': values}
-
-  def SetSelect (self, select):
-    assert(isinstance(select, str))
-    self._select = select
-
-
-  def ResetOverrides (self):
-    self._overrides = {}
-
-
-  def ResetFilters (self):
-    """
-    Clear all filters (for multi-queries).
-    """
-    self._filters = []
-    self._anchor = {}
-
-
-  def ResetGroupBy (self):
-    """
-    Clear groupby settings (for multi-queries).
-    """
-    self._groupby = ''
-    self._groupfunc = SPH_GROUPBY_DAY
-    self._groupsort = '@group desc'
-    self._groupdistinct = ''
-*)
 
 let dw = IO.BigEndian.write_i16
 let dd = IO.BigEndian.write_i32
@@ -553,181 +459,12 @@ let query sock q ?index ?comment s =
   | [r], w -> r, w
   | _ -> fail "query"
 
-(*
-  def BuildExcerpts (self, docs, index, words, opts=None):
-    """
-    Connect to searchd server and generate exceprts from given documents.
-    """
-    if not opts:
-      opts = {}
-    if isinstance(words,unicode):
-      words = words.encode('utf-8')
-
-    assert(isinstance(docs, list))
-    assert(isinstance(index, str))
-    assert(isinstance(words, str))
-    assert(isinstance(opts, dict))
-
-    sock = self._Connect()
-
-    if not sock:
-      return None
-
-    # fixup options
-    opts.setdefault('before_match', '<b>')
-    opts.setdefault('after_match', '</b>')
-    opts.setdefault('chunk_separator', ' ... ')
-    opts.setdefault('limit', 256)
-    opts.setdefault('around', 5)
-
-    # build request
-    # v.1.0 req
-
-    flags = 1 # (remove spaces)
-    if opts.get('exact_phrase'):  flags |= 2
-    if opts.get('single_passage'):  flags |= 4
-    if opts.get('use_boundaries'):  flags |= 8
-    if opts.get('weight_order'):  flags |= 16
-    if opts.get('query_mode'):  flags |= 32
-    if opts.get('force_all_words'):  flags |= 64
-
-    # mode=0, flags
-    req = [pack('>2L', 0, flags)]
-
-    # req index
-    req.append(pack('>L', len(index)))
-    req.append(index)
-
-    # req words
-    req.append(pack('>L', len(words)))
-    req.append(words)
-
-    # options
-    req.append(pack('>L', len(opts['before_match'])))
-    req.append(opts['before_match'])
-
-    req.append(pack('>L', len(opts['after_match'])))
-    req.append(opts['after_match'])
-
-    req.append(pack('>L', len(opts['chunk_separator'])))
-    req.append(opts['chunk_separator'])
-
-    req.append(pack('>L', int(opts['limit'])))
-    req.append(pack('>L', int(opts['around'])))
-
-    # documents
-    req.append(pack('>L', len(docs)))
-    for doc in docs:
-      if isinstance(doc,unicode):
-        doc = doc.encode('utf-8')
-      assert(isinstance(doc, str))
-      req.append(pack('>L', len(doc)))
-      req.append(doc)
-
-    req = ''.join(req)
-
-    # send query, get response
-    length = len(req)
-
-    # add header
-    req = pack('>2HL', SEARCHD_COMMAND_EXCERPT, VER_COMMAND_EXCERPT, length)+req
-    wrote = sock.send(req)
-
-    response = self._GetResponse(sock, VER_COMMAND_EXCERPT )
-    if not response:
-      return []
-
-    # parse response
-    pos = 0
-    res = []
-    rlen = len(response)
-
-    for i in range(len(docs)):
-      length = unpack('>L', response[pos:pos+4])[0]
-      pos += 4
-
-      if pos+length > rlen:
-        self._error = 'incomplete reply'
-        return []
-
-      res.append(response[pos:pos+length])
-      pos += length
-
-    return res
-
-  def BuildKeywords ( self, query, index, hits ):
-    """
-    Connect to searchd server, and generate keywords list for a given query.
-    Returns None on failure, or a list of keywords on success.
-    """
-    assert ( isinstance ( query, str ) )
-    assert ( isinstance ( index, str ) )
-    assert ( isinstance ( hits, int ) )
-
-    # build request
-    req = [ pack ( '>L', len(query) ) + query ]
-    req.append ( pack ( '>L', len(index) ) + index )
-    req.append ( pack ( '>L', hits ) )
-
-    # connect, send query, get response
-    sock = self._Connect()
-    if not sock:
-      return None
-
-    req = ''.join(req)
-    length = len(req)
-    req = pack ( '>2HL', SEARCHD_COMMAND_KEYWORDS, VER_COMMAND_KEYWORDS, length ) + req
-    wrote = sock.send ( req )
-
-    response = self._GetResponse ( sock, VER_COMMAND_KEYWORDS )
-    if not response:
-      return None
-
-    # parse response
-    res = []
-
-    nwords = unpack ( '>L', response[0:4] )[0]
-    p = 4
-    max_ = len(response)
-
-    while nwords>0 and p<max_:
-      nwords -= 1
-
-      length = unpack ( '>L', response[p:p+4] )[0]
-      p += 4
-      tokenized = response[p:p+length]
-      p += length
-
-      length = unpack ( '>L', response[p:p+4] )[0]
-      p += 4
-      normalized = response[p:p+length]
-      p += length
-
-      entry = { 'tokenized':tokenized, 'normalized':normalized }
-      if hits:
-        entry['docs'], entry['hits'] = unpack ( '>2L', response[p:p+8] )
-        p += 8
-
-      res.append ( entry )
-
-    if nwords>0 or p>max_:
-      self._error = 'incomplete reply'
-      return None
-
-    return res
-
-  def EscapeString(self, string):
-    return re.sub(r"([=\(\)|\-!@~\"&/\\\^\$\=])", r"\\\1", string)
-
-*)
-
 let flush_attrs sock =
   send sock & string_of_bitstring (BITSTRING { fst Command.flushattrs : 16; snd Command.flushattrs : 16; 0l : 32 });
   let (r,w) = get_response sock (snd Command.flushattrs) in
   bitmatch bits r with
   | { tag : 32 } -> tag
   | { s : -1 : string } -> fail "flush_attrs: unexpected response : %S" s
-
 
 (**
   [update_attrs conn index attrs values]
