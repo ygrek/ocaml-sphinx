@@ -88,8 +88,8 @@ type sort = SORT_RELEVANCE | SORT_ATTR_DESC | SORT_ATTR_ASC | SORT_TIME_SEGMENTS
 let show_sort = Show.show<sort>
 
 (** filter types *)
-type filter = FILTER_VALUES | FILTER_RANGE | FILTER_FLOATRANGE
-  deriving (Enum,Show)
+type filter = FILTER_VALUES of int64 array | FILTER_RANGE of int64 * int64 | FILTER_FLOATRANGE of float * float
+  deriving (Show)
 
 let show_filter = Show.show<filter>
 
@@ -141,7 +141,7 @@ type query =
     mutable sortby : string; (** attribute to sort by (default is "") *)
     mutable min_id : int64; (** min ID to match (default is 0) *)
     mutable max_id : int64; (** max ID to match (default is UINT_MAX) *)
-    mutable filters : int list; (** search filters *)
+    mutable filters : (string * filter * bool) list; (** search filters : attribute * filter * exclude *)
     mutable groupby : string; (** group-by attribute name *)
     mutable groupfunc : grouping; (** group-by function (to pre-process group-by attribute value with) *)
     mutable groupsort  : string; (** group-by sorting clause (to sort groups in result set with) *)
@@ -296,17 +296,22 @@ let set_id_range q id1 id2 =
     q.min_id <- min id1 id2;
     q.max_id <- max id1 id2
 
+let add_filter q a f exclude =
+    q.filters <- (a,f,exclude) :: q.filters
+
 let dw = IO.BigEndian.write_i16
 let dd = IO.BigEndian.write_i32
 let dq = IO.BigEndian.write_i64
+let df out f = IO.BigEndian.write_real_i32 out (Int32.bits_of_float f)
 let str out s = dd out (String.length s); IO.nwrite out s
 let pair kx ky (x,y) = kx x; ky y
 let list out l k = dd out (List.length l); List.iter k l
+let array out a k = dd out (Array.length a); Array.iter k a
 
 (** build query packet *)
 let build_query q ?(index="*") ?(comment="") query =
   let out = IO.output_string () in
-  let dd = dd out and dq = dq out and str = str out and list l = list out l in
+  let dd = dd out and dq = dq out and str = str out and list l = list out l and df = df out in
 
   dd q.offset;
   dd q.limit;
@@ -320,23 +325,14 @@ let build_query q ?(index="*") ?(comment="") query =
   dd 1; (* id64 range marker *)
   dq q.min_id;
   dq q.max_id;
-  (* TODO filters 
-    req.append ( pack ( '>L', len(self._filters) ) )
-    for f in self._filters:
-      req.append ( pack ( '>L', len(f['attr'])) + f['attr'])
-      filtertype = f['type']
-      req.append ( pack ( '>L', filtertype))
-      if filtertype == SPH_FILTER_VALUES:
-        req.append ( pack ('>L', len(f['values'])))
-        for val in f['values']:
-          req.append ( pack ('>q', val))
-      elif filtertype == SPH_FILTER_RANGE:
-        req.append ( pack ('>2q', f['min'], f['max']))
-      elif filtertype == SPH_FILTER_FLOATRANGE:
-        req.append ( pack ('>2f', f['min'], f['max']))
-      req.append ( pack ( '>L', f['exclude'] ) )
-  *)
-  list [] dd;
+  list q.filters (fun (attr,f,exclude) ->
+    str attr;
+    begin match f with
+    | FILTER_VALUES a -> dd 0; array out a dq
+    | FILTER_RANGE (q1,q2) -> dd 1; dq q1; dq q2
+    | FILTER_FLOATRANGE (f1,f2) -> dd 2; df f1; df f2
+    end;
+    dd (if exclude then 1 else 0));
 
   dd & Enum.from_enum<grouping> q.groupfunc;
   str q.groupby;

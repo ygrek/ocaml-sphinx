@@ -1,8 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: f4d52239744dd3a6ca5f326afaa41dd9)
+# DO NOT EDIT (digest: e38e417420f8008bd1d873b97dd413db)
 version = "0.0.1"
 description = "Sphinx searchd client API"
-requires = "extlib deriving.syntax bitstring.syntax"
+requires = "extlib deriving bitstring"
 archive(byte) = "sphinx.cma"
 archive(native) = "sphinx.cmxa"
 # OASIS_STOP

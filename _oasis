@@ -10,7 +10,7 @@ BuildTools:  ocamlbuild
 Library sphinx
   Path:    .
   Modules: Sphinx
-  BuildDepends: extlib, deriving.syntax, bitstring.syntax
+  BuildDepends: extlib, deriving, bitstring
 
 Executable test
   Path:   .

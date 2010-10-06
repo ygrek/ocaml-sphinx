@@ -54,7 +54,7 @@ type sort = SORT_RELEVANCE | SORT_ATTR_DESC | SORT_ATTR_ASC | SORT_TIME_SEGMENTS
 val show_sort : sort -> string
 
 (** filter types *)
-type filter = FILTER_VALUES | FILTER_RANGE | FILTER_FLOATRANGE
+type filter = FILTER_VALUES of int64 array | FILTER_RANGE of int64 * int64 | FILTER_FLOATRANGE of float * float
 val show_filter : filter -> string
 
 (** attribute types *)
@@ -88,7 +88,7 @@ type query =
     mutable sortby : string; (** attribute to sort by (default is "") *)
     mutable min_id : int64; (** min ID to match (default is 0) *)
     mutable max_id : int64; (** max ID to match (default is UINT_MAX) *)
-    mutable filters : int list; (** search filters *)
+    mutable filters : (string * filter * bool) list; (** search filters : attribute * filter * exclude *)
     mutable groupby : string; (** group-by attribute name *)
     mutable groupfunc : grouping; (** group-by function (to pre-process group-by attribute value with) *)
     mutable groupsort  : string; (** group-by sorting clause (to sort groups in result set with) *)
@@ -141,6 +141,10 @@ val set_limits : query -> ?maxmatches:int -> ?cutoff:int -> offset:int -> limit:
 (** Set IDs range to match.
     Only match records if document ID is beetwen [id1] and [id2] (inclusive). *)
 val set_id_range : query -> int64 -> int64 -> unit
+
+(** [add_filter query a filter exclude] adds [filter] on attribute [a] to [query]. 
+  If [exclude] is true then rows with matching attribute are excluded from resultset. *)
+val add_filter : query -> string -> filter -> bool -> unit
 
 (** build query packet *)
 val build_query : query -> ?index:string -> ?comment:string -> string -> string
