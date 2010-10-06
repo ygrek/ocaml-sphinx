@@ -14,12 +14,10 @@ let search ?addr ?index queries =
   q.mode <- MATCH_EXTENDED2;
   let each s =
     pr "Query : %s" s;
-    let r = query c q ?index s in
-    Option.may (pr "Warning : %s") (snd r);
-    match fst r with
-    | `Err s -> pr "Error : %s" s
-    | `Ok r ->
-      Option.may (pr "warning : %s") r.warning;
+    try
+      let (r,warning) = query c q ?index s in
+      Option.may (pr "Server warning : %s") warning;
+      Option.may (pr "Query warning : %s") r.warning;
       pr "Fields : [%s]" (array id r.fields);
       pr "Attributes : [%s]" (array id r.attrs);
       pr "Total %d, total_found %d, time %d ms" r.total r.total_found r.time;
@@ -27,6 +25,9 @@ let search ?addr ?index queries =
       pr "words:";
       Array.iter (fun (word,(docs,hits)) -> pr "%s (docs %d, hits %d)" word docs hits) r.words;
       pr ""
+    with
+    | Fail s -> pr "Error : %s" s
+    | exn -> pr "Exception : %s" (Printexc.to_string exn)
   in
   List.iter each queries;
   close c

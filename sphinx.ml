@@ -450,10 +450,11 @@ let run_queries sock reqs =
     @return result set
 *)
 let query sock q ?index ?comment s =
-  let s = build_query q ?index ?comment s in
-  match run_queries sock [s] with
-  | [r], w -> r, w
-  | _ -> fail "query"
+  let pkt = build_query q ?index ?comment s in
+  match run_queries sock [pkt] with
+  | [`Ok r], w -> r, w
+  | [`Err err], _ -> fail "query %S : %s" s err
+  | _ -> fail "query %S" s
 
 let flush_attrs sock =
   send sock & string_of_bitstring (BITSTRING { fst Command.flushattrs : 16; snd Command.flushattrs : 16; 0l : 32 });

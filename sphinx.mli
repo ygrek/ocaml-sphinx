@@ -153,15 +153,15 @@ val build_query : query -> ?index:string -> ?comment:string -> string -> string
 val run_queries : conn -> string list -> [> `Err of string | `Ok of result ] list * string option
 
 (** Perform search query
-    @raise Fail on protocol errors
-    @return result set
+    @raise Fail on protocol and query errors
+    @return result set and optional warning message
 *)
 val query :
   conn ->
   query ->
   ?index:string ->
   ?comment:string ->
-  string -> [> `Err of string | `Ok of result ] * string option
+  string -> result * string option
 
 (** Flush attributes to disk *)
 val flush_attrs : conn -> int32
