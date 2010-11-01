@@ -118,7 +118,7 @@ let show_attr = function
   | F f -> string_of_float f
   | S s -> sprintf "%S" s
   | L x -> string_of_num x
-  | Q x -> Int64.to_string x
+  | Q x -> Int64.to_string x ^ "L"
   | MVA l -> "[" ^ String.concat "," (List.map string_of_num (Array.to_list l)) ^ "]"
 
 let attr_multi = 0X40000000l
