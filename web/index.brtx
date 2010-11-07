@@ -9,7 +9,11 @@
 
 {begin list}
 {*}{link https://forge.ocamlcore.org/projects/sphinx/|OCamlCore project page}
-#{*}{link https://forge.ocamlcore.org/frs/?group_id=182|Download}
+{*}{link https://forge.ocamlcore.org/frs/?group_id=182|Download}
+{begin list}
+  {*}{link https://forge.ocamlcore.org/frs/download.php/509/ocaml-sphinx-0.0.1.tar.gz|ocaml-sphinx-0.0.1.tar.gz}
+  ({link https://forge.ocamlcore.org/frs/download.php/510/ocaml-sphinx-0.0.1.tar.gz.asc|sig}), 7 Nov 2010
+{end}
 {*}{link https://forge.ocamlcore.org/tracker/?group_id=182|Bug tracker}
 {*}Code
 {begin list}
@@ -18,11 +22,11 @@
   {*}git+ssh://forge.ocamlcore.org/gitroot/sphinx/sphinx.git
 {end}
 {*}{link api/index.html|Online API documentation}
-#{*}{link http://git.ocamlcore.org/cgi-bin/gitweb.cgi?p=sphinx/sphinx.git;a=blob_plain;f=README.txt;hb=HEAD|README}
+{*}{link http://git.ocamlcore.org/cgi-bin/gitweb.cgi?p=sphinx/sphinx.git;a=blob_plain;f=CHANGES.txt;hb=HEAD|CHANGES}
 {end}
 
 {bypass end}<hr/>{end}
-{p}2010-10-04
+{p}2010-11-07
 {bypass end}
 <a href="http://oasis.forge.ocamlcore.org/">
   <img
