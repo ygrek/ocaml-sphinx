@@ -1,0 +1,4 @@
+
+0.0.1 - 7 Nov 2010
+* First release, supported commands: search, update_attrs, flush_attrs
+

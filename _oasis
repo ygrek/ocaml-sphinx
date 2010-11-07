@@ -3,9 +3,13 @@ Name:        sphinx
 Version:     0.0.1
 Synopsis:    Sphinx searchd client API
 Authors:     ygrek
+Copyrights:  (C) 2010 ygrek
 License:     GPL-2 with OCaml linking exception
-Plugins:     META, DevFiles
+Plugins:     META, DevFiles, StdFiles
 BuildTools:  ocamlbuild
+
+XStdFilesREADME: false
+XStdFilesAUTHORS: false
 
 Library sphinx
   Path:    .
